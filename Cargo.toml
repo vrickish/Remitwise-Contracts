@@ -47,7 +47,8 @@ reporting = { path = "./reporting" }
 orchestrator = { path = "./orchestrator" }
 
 [dev-dependencies]
-soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+soroban-sdk = { version = "=21.7.7", features = ["testutils"] }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

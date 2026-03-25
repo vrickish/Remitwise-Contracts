@@ -586,6 +586,10 @@ impl SavingsGoalContract {
     ///   supports backfill or migration use cases where historical goals are
     ///   recorded after the fact. Callers that need strictly future-dated
     ///   goals should validate this before invoking the contract.
+    ///
+    /// # Events
+    /// - Emits `GOAL_CREATED` with goal details.
+    /// - Emits `SavingsEvent::GoalCreated`.
     pub fn create_goal(
         env: Env,
         owner: Address,
@@ -864,6 +868,29 @@ impl SavingsGoalContract {
     ///
     /// # Panics
     /// * If `caller` does not authorize the transaction
+    /// Withdraws funds from an existing savings goal.
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the goal owner (must authorize)
+    /// * `goal_id` - ID of the goal to withdraw from
+    /// * `amount` - Amount to withdraw in stroops (must be > 0)
+    ///
+    /// # Returns
+    /// `Ok(remaining_amount)` - The remaining amount in the goal after withdrawal
+    ///
+    /// # Errors
+    /// * `InvalidAmount` - If amount ≤ 0
+    /// * `GoalNotFound` - If goal_id does not exist
+    /// * `Unauthorized` - If caller is not the goal owner
+    /// * `InsufficientBalance` - If amount > current_amount
+    /// * `GoalLocked` - If the goal is locked or time-lock has not expired
+    ///
+    /// # Time-lock Behavior
+    /// - If `unlock_date` is set, withdrawal will fail if `env.ledger().timestamp() < unlock_date`.
+    /// - Boundary condition: Success if `timestamp == unlock_date`.
+    ///
+    /// # Events
+    /// - Emits `SavingsEvent::FundsWithdrawn`.
     pub fn withdraw_from_goal(
         env: Env,
         caller: Address,
@@ -937,6 +964,14 @@ impl SavingsGoalContract {
         Ok(new_amount)
     }
 
+    /// Locks a goal to prevent manual withdrawals.
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the goal owner
+    /// * `goal_id` - ID of the goal
+    ///
+    /// # Events
+    /// - Emits `SavingsEvent::GoalLocked`.
     pub fn lock_goal(env: Env, caller: Address, goal_id: u32) -> bool {
         caller.require_auth();
         Self::require_not_paused(&env, pause_functions::LOCK);
@@ -976,6 +1011,14 @@ impl SavingsGoalContract {
         true
     }
 
+    /// Unlocks a goal for manual withdrawals.
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the goal owner
+    /// * `goal_id` - ID of the goal
+    ///
+    /// # Events
+    /// - Emits `SavingsEvent::GoalUnlocked`.
     pub fn unlock_goal(env: Env, caller: Address, goal_id: u32) -> bool {
         caller.require_auth();
         Self::require_not_paused(&env, pause_functions::UNLOCK);
@@ -1347,6 +1390,15 @@ impl SavingsGoalContract {
     }
 
     /// Set time-lock on a goal
+    /// Sets a time-lock on a savings goal.
+    ///
+    /// # Arguments
+    /// * `caller` - Address of the goal owner
+    /// * `goal_id` - ID of the goal
+    /// * `unlock_date` - Unix timestamp when the goal becomes withdrawable
+    ///
+    /// # Panics
+    /// - If caller is not the owner or goal not found.
     pub fn set_time_lock(env: Env, caller: Address, goal_id: u32, unlock_date: u64) -> bool {
         caller.require_auth();
         Self::extend_instance_ttl(&env);
@@ -1386,6 +1438,17 @@ impl SavingsGoalContract {
         true
     }
 
+    /// Creates a recurring savings schedule.
+    ///
+    /// # Arguments
+    /// * `owner` - Address of the schedule owner
+    /// * `goal_id` - ID of the goal to fund
+    /// * `amount` - Amount to save in each interval
+    /// * `next_due` - First execution timestamp
+    /// * `interval` - Seconds between executions
+    ///
+    /// # Returns
+    /// - ID of the new schedule
     pub fn create_savings_schedule(
         env: Env,
         owner: Address,
@@ -1548,6 +1611,26 @@ impl SavingsGoalContract {
         true
     }
 
+    /// Executes all active and due savings schedules.
+    ///
+    /// # Drift Handling
+    /// - If execution is delayed, the schedule will "catch up" by skipping missed intervals
+    ///   and incrementing `missed_count`.
+    /// - `next_due` is set to the next future interval anchor.
+    ///
+    /// # Events
+    /// - Emits `SavingsEvent::ScheduleExecuted` for each successful execution.
+    /// - Emits `SavingsEvent::ScheduleMissed` for each interval missed.
+    /// Executes all active and due savings schedules.
+    ///
+    /// # Drift Handling
+    /// - If execution is delayed, the schedule will "catch up" by skipping missed intervals
+    ///   and incrementing `missed_count`.
+    /// - `next_due` is set to the next future interval anchor.
+    ///
+    /// # Events
+    /// - Emits `SavingsEvent::ScheduleExecuted` for each successful execution.
+    /// - Emits `SavingsEvent::ScheduleMissed` for each interval missed.
     pub fn execute_due_savings_schedules(env: Env) -> Vec<u32> {
         Self::extend_instance_ttl(&env);
 

@@ -13,12 +13,21 @@
 //! ## Architecture
 //!
 //! The orchestrator acts as a coordination layer that:
-//! 1. Validates permissions via the Family Wallet contract
-//! 2. Calculates remittance splits via the Remittance Split contract
-//! 3. Executes downstream operations:
+//! 1. Validates configured contract addresses before execution
+//! 2. Validates permissions via the Family Wallet contract
+//! 3. Calculates remittance splits via the Remittance Split contract
+//! 4. Executes downstream operations:
 //!    - Deposits to Savings Goals
 //!    - Pays Bills
 //!    - Pays Insurance Premiums
+//!
+//! ## Address Validation
+//!
+//! Before executing any cross-contract calls, the orchestrator validates:
+//! - No address references the orchestrator itself (prevents self-referential calls)
+//! - All addresses are distinct (prevents misconfiguration where same contract serves multiple roles)
+//!
+//! This validation occurs early in the execution flow to minimize gas costs on invalid inputs.
 //!
 //! ## Atomicity Guarantees
 //!
@@ -30,10 +39,11 @@
 //! ## Gas Estimation
 //!
 //! Typical gas costs for orchestrator operations:
+//! - Address validation: ~500 gas
 //! - Permission check: ~2,000 gas
 //! - Remittance split calculation: ~3,000 gas
 //! - Each downstream operation: ~4,000 gas
-//! - Complete remittance flow: ~22,000 gas
+//! - Complete remittance flow: ~22,500 gas
 //!
 //! ## Usage Example
 //!
@@ -1077,7 +1087,25 @@ impl Orchestrator {
 
         let timestamp = env.ledger().timestamp();
 
-        // Step 1: Validate amount
+        Self::validate_remittance_flow_addresses(
+            &env,
+            &family_wallet_addr,
+            &remittance_split_addr,
+            &savings_addr,
+            &bills_addr,
+            &insurance_addr,
+        )
+        .map_err(|e| {
+            Self::emit_error_event(
+                &env,
+                &caller,
+                symbol_short!("addr_val"),
+                e as u32,
+                timestamp,
+            );
+            e
+        })?;
+
         if total_amount <= 0 {
             Self::emit_error_event(
                 &env,
